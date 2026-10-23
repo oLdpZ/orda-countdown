@@ -1,6 +1,6 @@
 # Countdown WoW Forever — Orda Florentiae
 
-GIF animata con il conto alla rovescia al lancio di WoW Forever (mezzanotte 4→5 novembre 2026), aggiornata ogni ora in un messaggio Discord tramite webhook.
+GIF animata con il conto alla rovescia al lancio di WoW Forever (mezzanotte 4→5 novembre 2026), aggiornata ogni ora in un messaggio Discord tramite webhook. Nelle ultime 24 ore mostra ore e minuti: un secondo job su cron-job.org (solo il 4 novembre) la aggiorna ogni minuto.
 
 - `countdown.py render out.gif [--at 2026-11-05T00:00:00Z]`: genera la GIF in locale.
 - `countdown.py update`: genera la GIF e aggiorna il messaggio (serve `WEBHOOK_URL`). Lo stato (ID del messaggio, lancio avvenuto) è in `state.json`.

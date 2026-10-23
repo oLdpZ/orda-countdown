@@ -174,9 +174,13 @@ def render(now, out):
         lt.text((cx, 414), "Il portale è aperto", 32)
     else:
         lt.text((cx, 372), "Il portale si apre tra", 16, glow=False)
-        lt.text((cx, 404), f"{left.days:02d} : {left.seconds // 3600:02d}", 54)
-        lt.text((cx - 39, 440), "giorni", 14, glow=False)
-        lt.text((cx + 39, 440), "ore", 14, glow=False)
+        if left.days:
+            big, units = (left.days, left.seconds // 3600), ("giorni", "ore")
+        else:  # last day: hours and minutes, refreshed every minute by cron-job.org
+            big, units = (left.seconds // 3600, left.seconds // 60 % 60), ("ore", "minuti")
+        lt.text((cx, 404), f"{big[0]:02d} : {big[1]:02d}", 54)
+        lt.text((cx - 39, 440), units[0], 14, glow=False)
+        lt.text((cx + 39, 440), units[1], 14, glow=False)
     band = soft(((PX >= OX0 - 30) & (PX < OX1 + 30) & (PY >= 358)).astype(float), 12)
 
     logo = Image.open(ASSETS / "forever_logo.png").convert("RGBA")
