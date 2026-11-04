@@ -21,6 +21,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Decrypt launch sound
+        continue-on-error: true  # without it the synthesised horn is used
+        run: openssl enc -d -aes-256-cbc -pbkdf2 -in assets/suono.ogg.enc -out suono.ogg -pass env:SOUND_KEY
+        env:
+          SOUND_KEY: ${{ secrets.SOUND_KEY }}
       - run: python countdown.py update
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}

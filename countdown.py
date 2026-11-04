@@ -7,7 +7,7 @@ textures, additive blending, UV scroll speeds). A webhook keeps one Discord mess
     python countdown.py render out.gif [--at 2026-10-30T12:00:00Z]
     python countdown.py update          # needs WEBHOOK_URL; keeps state in state.json
 """
-import argparse, json, math, os, random, struct, sys, wave
+import argparse, json, math, os, random, struct, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -294,27 +294,6 @@ def queue_box(img, pos, title, small):
         d.text((cx, y0 + 62), "Benvenuto a casa, peone. Zug zug!", font=small, fill=(140, 255, 60), anchor="mm")
 
 
-def horn(path):
-    """An original war-horn call, synthesised: two long low blasts and a rising third, 16-bit mono WAV."""
-    sr = 22050
-    out = []
-    for dur, f0, f1 in [(1.1, 98, 98), (1.1, 98, 98), (2.2, 98, 147)]:
-        t = np.arange(int(sr * dur)) / sr
-        f = f0 + (f1 - f0) * np.clip(t / (dur * 0.6), 0, 1) ** 2 + 1.5 * np.sin(2 * np.pi * 5 * t) * (t / dur)
-        ph = 2 * np.pi * np.cumsum(f) / sr
-        x = sum(a * np.sin(n * ph) for n, a in [(1, 1), (2, 0.7), (3, 0.5), (4, 0.3), (5, 0.18), (6, 0.1)])
-        x = np.tanh(1.6 * x)  # brassy grit
-        env = np.minimum(1, t / 0.12) * np.minimum(1, (dur - t) / 0.35)
-        out += [x * env, np.zeros(int(sr * 0.18))]
-    y = np.concatenate(out)
-    y = (y / np.abs(y).max() * 0.85 * 32767).astype("<i2")
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes(y.tobytes())
-
-
 def send(method, url, content, gif=None, ping=False, audio=None):
     import requests
     payload = {"content": content, "allowed_mentions": {"parse": ["everyone"] if ping else []}}
@@ -323,8 +302,9 @@ def send(method, url, content, gif=None, ping=False, audio=None):
         payload["attachments"] = [{"id": 0, "filename": "portale.gif"}]  # replaces the previous GIF
         files["files[0]"] = ("portale.gif", open(gif, "rb"), "image/gif")
     if audio:
-        payload["attachments"] = [{"id": 0, "filename": "corno-di-guerra.wav"}]
-        files["files[0]"] = ("corno-di-guerra.wav", open(audio, "rb"), "audio/wav")
+        name, mime = "suono-del-portale.ogg", "audio/ogg"
+        payload["attachments"] = [{"id": 0, "filename": name}]
+        files["files[0]"] = (name, open(audio, "rb"), mime)
     r = requests.request(method, url, data={"payload_json": json.dumps(payload)}, files=files or None, timeout=120)
     if r.status_code >= 300:
         sys.exit(f"Discord {r.status_code}: {r.text[:300]}")
@@ -349,13 +329,14 @@ def update():
         if LAUNCH_TEXT.exists():
             text = LAUNCH_TEXT.read_text(encoding="utf-8").strip() + "\n\n🎲 " + random.choice(JOKES)
             text += "\n🎵 Per tornare al 2004, la musica del login originale: *Legends of Azeroth* → https://warcraft.wiki.gg/wiki/Legends_of_Azeroth"
-            text += "\n🔊 Premete play: il corno di guerra chiama l'Orda!"
+            sound = HERE / "suono.ogg"  # decrypted by the workflow from assets/suono.ogg.enc
             try:
-                horn(HERE / "corno.wav")
-                send("POST", hook, text, ping=True, audio=HERE / "corno.wav")
-            except BaseException as e:  # never lose the announcement over the horn
-                print("horn failed:", e)
-                send("POST", hook, text.rsplit("\n", 1)[0], ping=True)
+                if not sound.exists():
+                    raise FileNotFoundError(sound)
+                send("POST", hook, text + "\n🔊 Premete play: il portale chiama l'Orda!", ping=True, audio=sound)
+            except BaseException as e:  # never lose the announcement over the sound
+                print("sound failed:", e)
+                send("POST", hook, text, ping=True)
         state["launched"] = True
     STATE.write_text(json.dumps(state, indent=2) + "\n")
     print("updated", state, gif.stat().st_size)
@@ -368,13 +349,9 @@ if __name__ == "__main__":
     r.add_argument("out")
     r.add_argument("--at", help="render as if it were this UTC time, e.g. 2026-11-05T00:00:00Z")
     sub.add_parser("update")
-    sub.add_parser("horn").add_argument("out")
     args = ap.parse_args()
     if args.cmd == "render":
         at = datetime.fromisoformat(args.at.replace("Z", "+00:00")) if args.at else datetime.now(timezone.utc)
         print("open" if render(at, args.out) else "countdown", Path(args.out).stat().st_size)
-    elif args.cmd == "horn":
-        horn(args.out)
-        print(random.choice(JOKES))
     else:
         update()
