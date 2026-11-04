@@ -7,7 +7,7 @@ textures, additive blending, UV scroll speeds). A webhook keeps one Discord mess
     python countdown.py render out.gif [--at 2026-10-30T12:00:00Z]
     python countdown.py update          # needs WEBHOOK_URL; keeps state in state.json
 """
-import argparse, json, math, os, random, struct, sys
+import argparse, json, math, os, random, struct, sys, wave
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +38,22 @@ FLAMES = [((40, 300, 120, 395), (80, 365)), ((555, 285, 640, 380), (598, 350))]
 EYES = [(179, 125), (189, 125), (555, 76), (568, 76), (307, 48), (343, 46)]
 
 PX, PY = np.meshgrid(np.arange(W), np.arange(H))
+
+# launch-night GIF, in three acts over the 84-frame loop: the portal bursts, it stays open, the login queue
+ACT_OPEN, ACT_QUEUE = 30, 54
+QUEUE = [4832, 4831, 3977, 3120, 2406, 1789, 1203, 777, 404, 250, 133, 69, 42, 17, 8, 3, 2, 1]
+JOKES = [
+    "Il primo che muore a Durotar paga da bere. 🍺",
+    "Zug zug: si lavora fino all'alba, peoni!",
+    "Chi chiede \"dove sono i cinghiali?\" va a raccogliere legna per una settimana.",
+    "Ricordate: il lupo è una cavalcatura, non un cane da accarezzare in mezzo alla strada.",
+    "Vietato fare \"Leeroy\" nella prima istanza. Nella seconda si vede.",
+    "Stanotte niente Firenze: la capitale è Orgrimmar. Il lampredotto lo portate voi.",
+    "Se lagga è colpa dell'Alleanza. Sempre.",
+    "Chi resta in coda più di un'ora ha diritto a lamentarsi in chat. Ma solo in orchesco.",
+    "Il raduno è nella Valle delle Prove: chi arriva ultimo porta i cinghiali per tutti.",
+    "Lok'tar Ogar! (traduzione per i nuovi: \"stanotte non si dorme\").",
+]
 
 
 def blob(x, y, sx, sy):
@@ -172,6 +188,14 @@ def render(now, out):
     if is_open:
         lt.text((cx, 380), "World of Warcraft Forever", 15, glow=False)
         lt.text((cx, 414), "Il portale è aperto", 32)
+        # the war cry, at three sizes for the pulse of the opening act
+        shouts = []
+        for size in (50, 56, 62):
+            sh = Lettering()
+            sh.text((W // 2, 405), "LOK'TAR OGAR!", size)
+            shouts.append(sh)
+        small = ImageFont.load_default(size=15)
+        title = ImageFont.truetype(str(ASSETS / "MORPHEUS.TTF"), 22)
     else:
         lt.text((cx, 372), "Il portale si apre tra", 16, glow=False)
         if left.days:
@@ -219,20 +243,34 @@ def render(now, out):
             r = 1.6 * a + 0.6
             d.ellipse((x - r, y - r, x + r, y + r), fill=(255, int(120 + 100 * a), int(30 * a)))
         f = np.asarray(img).astype(float)
-        shine = np.exp(-(((PX + PY * 0.5) - (-150 + (W + 450) * ((3 * k / N) % 1))) / 14.0) ** 2) * lt.letters
-        f = f * (1 - lt.a[..., None]) + lt.rgb * lt.a[..., None] + shine[..., None] * 110
+        cur = lt
+        if is_open and k < ACT_OPEN:  # act 1: the portal bursts green, then the war cry pulses
+            cur = shouts[[0, 1, 2, 1][k % 4]]
+            t = k / ACT_OPEN
+            burst = math.exp(-((t - 0.12) / 0.09) ** 2)  # white flash peaks early in the act
+            ring = np.exp(-((np.hypot(PX - cx, (PY - (OY0 + OY1) / 2) * 1.3) - 900 * t) / 60) ** 2) * (1 - t)
+            glow = blob(cx, (OY0 + OY1) / 2, 160 + 500 * t, 200 + 500 * t) * (1 - t) * 0.9
+            g = np.clip(ring + glow, 0, 1)[..., None] * np.array([140, 255, 40])
+            f = np.clip(f + g, 0, 255) * (1 - burst) + np.array([235, 255, 210]) * burst
+        shine = np.exp(-(((PX + PY * 0.5) - (-150 + (W + 450) * ((3 * k / N) % 1))) / 14.0) ** 2) * cur.letters
+        queue = is_open and k >= ACT_QUEUE
+        if not queue:  # act 3 has no lettering: the queue box takes the band
+            f = f * (1 - cur.a[..., None]) + cur.rgb * cur.a[..., None] + shine[..., None] * 110
         img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8))
+        if queue:
+            queue_box(img, QUEUE[min(len(QUEUE) - 1, (k - ACT_QUEUE) * len(QUEUE) // (N - ACT_QUEUE - 6))], title, small)
         img.paste(logo, logo_xy, logo)
         frames.append(img)
 
     # one palette for the whole loop, taken from four frames spread over it plus extra logo
     # samples, so its small blue area keeps colours of its own
-    strip = Image.new("RGB", (W, H * 5))
-    for i in range(4):
-        strip.paste(frames[i * N // 4], (0, H * i))
+    picks = [2, 8, 20, ACT_OPEN + 5, ACT_QUEUE + 5, N - 1] if is_open else [i * N // 4 for i in range(4)]
+    strip = Image.new("RGB", (W, H * (len(picks) + 1)))
+    for i, fi in enumerate(picks):
+        strip.paste(frames[fi], (0, H * i))
     tile = frames[0].crop((logo_xy[0], logo_xy[1], logo_xy[0] + logo.width, logo_xy[1] + logo.height))
     for x in range(0, W, tile.width):
-        for y in range(H * 4, H * 5, tile.height):
+        for y in range(H * len(picks), H * (len(picks) + 1), tile.height):
             strip.paste(tile, (x, y))
     pal = strip.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     q = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in frames]
@@ -240,13 +278,53 @@ def render(now, out):
     return is_open
 
 
-def send(method, url, content, gif=None, ping=False):
+def queue_box(img, pos, title, small):
+    """A 2004-style realm queue dialog: dark panel, gold frame, position counting down."""
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = W // 2 - 175, 352, W // 2 + 175, 446
+    d.rectangle((x0, y0, x1, y1), fill=(12, 8, 6), outline=(200, 160, 60), width=3)
+    d.rectangle((x0 + 5, y0 + 5, x1 - 5, y1 - 5), outline=(90, 60, 20), width=1)
+    cx = W // 2
+    if pos > 1:
+        d.text((cx, y0 + 22), "Il reame Orda Florentiae è pieno", font=title, fill=(255, 210, 0), anchor="mm")
+        d.text((cx, y0 + 50), f"Posizione in coda: {pos:,}".replace(",", "."), font=small, fill=(255, 255, 255), anchor="mm")
+        d.text((cx, y0 + 72), "Tempo stimato: Lok'tar", font=small, fill=(200, 200, 200), anchor="mm")
+    else:
+        d.text((cx, y0 + 28), "Posizione in coda: 1", font=title, fill=(255, 210, 0), anchor="mm")
+        d.text((cx, y0 + 62), "Benvenuto a casa, peone. Zug zug!", font=small, fill=(140, 255, 60), anchor="mm")
+
+
+def horn(path):
+    """An original war-horn call, synthesised: two long low blasts and a rising third, 16-bit mono WAV."""
+    sr = 22050
+    out = []
+    for dur, f0, f1 in [(1.1, 98, 98), (1.1, 98, 98), (2.2, 98, 147)]:
+        t = np.arange(int(sr * dur)) / sr
+        f = f0 + (f1 - f0) * np.clip(t / (dur * 0.6), 0, 1) ** 2 + 1.5 * np.sin(2 * np.pi * 5 * t) * (t / dur)
+        ph = 2 * np.pi * np.cumsum(f) / sr
+        x = sum(a * np.sin(n * ph) for n, a in [(1, 1), (2, 0.7), (3, 0.5), (4, 0.3), (5, 0.18), (6, 0.1)])
+        x = np.tanh(1.6 * x)  # brassy grit
+        env = np.minimum(1, t / 0.12) * np.minimum(1, (dur - t) / 0.35)
+        out += [x * env, np.zeros(int(sr * 0.18))]
+    y = np.concatenate(out)
+    y = (y / np.abs(y).max() * 0.85 * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(y.tobytes())
+
+
+def send(method, url, content, gif=None, ping=False, audio=None):
     import requests
     payload = {"content": content, "allowed_mentions": {"parse": ["everyone"] if ping else []}}
     files = {}
     if gif:
         payload["attachments"] = [{"id": 0, "filename": "portale.gif"}]  # replaces the previous GIF
         files["files[0]"] = ("portale.gif", open(gif, "rb"), "image/gif")
+    if audio:
+        payload["attachments"] = [{"id": 0, "filename": "corno-di-guerra.wav"}]
+        files["files[0]"] = ("corno-di-guerra.wav", open(audio, "rb"), "audio/wav")
     r = requests.request(method, url, data={"payload_json": json.dumps(payload)}, files=files or None, timeout=120)
     if r.status_code >= 300:
         sys.exit(f"Discord {r.status_code}: {r.text[:300]}")
@@ -269,7 +347,14 @@ def update():
         state["message_id"] = send("POST", f"{hook}?wait=true", content, gif)["id"]
     if is_open:
         if LAUNCH_TEXT.exists():
-            send("POST", hook, LAUNCH_TEXT.read_text(encoding="utf-8").strip(), ping=True)
+            text = LAUNCH_TEXT.read_text(encoding="utf-8").strip() + "\n\n🎲 " + random.choice(JOKES)
+            text += "\n🔊 Premete play: il corno di guerra chiama l'Orda!"
+            try:
+                horn(HERE / "corno.wav")
+                send("POST", hook, text, ping=True, audio=HERE / "corno.wav")
+            except BaseException as e:  # never lose the announcement over the horn
+                print("horn failed:", e)
+                send("POST", hook, text.rsplit("\n", 1)[0], ping=True)
         state["launched"] = True
     STATE.write_text(json.dumps(state, indent=2) + "\n")
     print("updated", state, gif.stat().st_size)
@@ -282,9 +367,13 @@ if __name__ == "__main__":
     r.add_argument("out")
     r.add_argument("--at", help="render as if it were this UTC time, e.g. 2026-11-05T00:00:00Z")
     sub.add_parser("update")
+    sub.add_parser("horn").add_argument("out")
     args = ap.parse_args()
     if args.cmd == "render":
         at = datetime.fromisoformat(args.at.replace("Z", "+00:00")) if args.at else datetime.now(timezone.utc)
         print("open" if render(at, args.out) else "countdown", Path(args.out).stat().st_size)
+    elif args.cmd == "horn":
+        horn(args.out)
+        print(random.choice(JOKES))
     else:
         update()
