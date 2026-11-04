@@ -348,6 +348,7 @@ def update():
     if is_open:
         if LAUNCH_TEXT.exists():
             text = LAUNCH_TEXT.read_text(encoding="utf-8").strip() + "\n\n🎲 " + random.choice(JOKES)
+            text += "\n🎵 Per tornare al 2004, la musica del login originale: *Legends of Azeroth* → https://warcraft.wiki.gg/wiki/Legends_of_Azeroth"
             text += "\n🔊 Premete play: il corno di guerra chiama l'Orda!"
             try:
                 horn(HERE / "corno.wav")
